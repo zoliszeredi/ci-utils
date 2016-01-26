@@ -1,0 +1,4 @@
+pylint == 1.5.4
+pylint-django == 0.7.1
+radon  == 1.2.2
+xenon  == 0.3.3
