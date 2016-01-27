@@ -14,8 +14,12 @@
 #
 
 provision () {
-    local venv="$1/metrics"
-    local here="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+    # creates a virtualenv with the specified requirements file
+    #
+    # :param venv: the path to where the virtualenv shoud be made
+    # :param requirements_file: the path to the requirements file
+    local venv="$1"
+    local requirements_file="$2"
 
     [[ -z $(which virtualenv) ]] \
 	&& echo "no virtualenv present, exiting." && exit 1
@@ -24,28 +28,32 @@ provision () {
 
     if [[ ! -e "${venv}" ]]; then
 	virtualenv "${venv}"
-	"${venv}"/bin/pip install -r requirements.txt
+	"${venv}"/bin/pip install -r "$requirements_file"
     fi
-
-    ln -s "${here}/pylintrc" "${venv}/pylintrc"
-    ln -s "${here}/diff_pylint.py" "${venv}/diff_pylint.py"
 }
 
 
 check_commit () {
+    # runs the chackers for a given commit, and generate artifacts
+    #
+    # :param project_path: the python package to be checked
+    # :param working_dir: path to where the artifacts and venv is
+    # :param commit_sha1: the commit agains whichs the checks are made
     local project_path="$1"
+    local working_dir="$2"
     local commit_sha1="$3"
-    local venv="$2/metrics"
-    local artifacts_dir="${venv}/artifacts/${commit_sha1}"
+    local venv="${working_dir}/metrics_${commit_sha1}"
+    local artifacts_dir="${working_dir}/artifacts/${commit_sha1}"
 
 
     [[ -d "${artifacts_dir}" ]] || mkdir -p "${artifacts_dir}"
 
     cd "${project_path}" && git checkout "${commit_sha1}"
-    "${venv}/bin/pip" install --upgrade ..
+    provision "${venv}" "${working_dir}/requirements.txt"
+    "${venv}/bin/pip" install .. # the directory where the setup.py is located
     "${venv}/bin/pylint" --output-format=json \
 			 --load-plugins pylint_django \
-			 --rcfile "${venv}/pylintrc" \
+			 --rcfile "${working_dir}/pylintrc" \
 		       "${project_path}" > "${artifacts_dir}/pylint-results.json"
     "${venv}/bin/radon" cc -j \
 			"${project_path}" > "${artifacts_dir}/radon-results.json"
@@ -55,15 +63,20 @@ check_commit () {
 
 diff_pylint() {
     # compares the pylint output of the two pylint json-files
+    #
+    # :param working_dir: the directory where artifacts are located
+    # :param head_sha1: the HEAD commit from the working branch
+    # :param merge_base_sha1: the commit destination master branch
     local working_dir="$1"
-    local venv="${working_dir}/metrics"
-    local artifacts_dir="${working_dir}/metrics/artifacts/"
-    local after="${artifacts_dir}$2"
-    local before="${artifacts_dir}$3"
+    local head_sha1="$2"
+    local merge_base_sha1="$3"
+    local artifacts_dir="${working_dir}/artifacts/"
+    local source="${working_dir}/artifacts/${head_sha1}"
+    local destination="${working_dir}/artifacts/${merge_base_sha1}"
 
-    "${venv}/bin/python" "${venv}/diff_pylint.py" \
-			 "${after}/pylint-results.json" \
-			 "${before}/pylint-results.json"
+    /usr/bin/env python "${working_dir}/diff_pylint.py" \
+		 "${source}/pylint-results.json" \
+		 "${destination}/pylint-results.json"
 }
 
 diff_radon() {
@@ -72,15 +85,21 @@ diff_radon() {
 }
 
 run () {
+    # run the checkers available and compares the artifacts generated
+    #
+    # :param project_path: the path to the python package to be
+    #                      checked
     local project_path="$1"
     local working_dir=$(mktemp -d --tmpdir=/tmp)
     local head_sha1=$(cd "${project_path}" && git rev-parse HEAD)
     local merge_base_sha1=$(cd "${project_path}" && \
 				   git merge-base HEAD "${GIT_ORIGIN_BRANCH:-master}")
-    local venv="${working_dir}/metrics"
-    local artifacts_dir="${venv}/artifacts/"
+    local here="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-    provision "${working_dir}"
+    ln -s "${here}/pylintrc" "${working_dir}/pylintrc"
+    ln -s "${here}/diff_pylint.py" "${working_dir}/diff_pylint.py"
+    ln -s "${here}/requirements.txt" "${working_dir}/requirements.txt"
+
     check_commit "${project_path}" "${working_dir}" "${head_sha1}"
     check_commit "${project_path}" "${working_dir}" "${merge_base_sha1}"
     diff_pylint "${working_dir}" "${head_sha1}" "${merge_base_sha1}"
