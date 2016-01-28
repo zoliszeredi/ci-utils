@@ -44,17 +44,19 @@ check_commit () {
     local commit_sha1="$3"
     local venv="${working_dir}/metrics_${commit_sha1}"
     local artifacts_dir="${working_dir}/artifacts/${commit_sha1}"
-
-
+    local packages=$(find "${project_path}" -maxdepth 2 \
+                          -name '__init__.py' \
+			  -type f \
+			  -printf "%h\n" | sort -u)
     [[ -d "${artifacts_dir}" ]] || mkdir -p "${artifacts_dir}"
 
     cd "${project_path}" && git checkout "${commit_sha1}"
     provision "${venv}" "${working_dir}/requirements.txt"
-    "${venv}/bin/pip" install .. # the directory where the setup.py is located
+    "${venv}/bin/pip" install . # the directory where the setup.py is located
     "${venv}/bin/pylint" --output-format=json \
 			 --load-plugins pylint_django \
 			 --rcfile "${working_dir}/pylintrc" \
-		       "${project_path}" > "${artifacts_dir}/pylint-results.json"
+		       "${packages}" > "${artifacts_dir}/pylint-results.json"
     "${venv}/bin/radon" cc -j \
 			"${project_path}" > "${artifacts_dir}/radon-results.json"
 
